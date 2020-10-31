@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include "RVL.h"
 #include <record3d/Record3DStream.h>
 #include <mutex>
 
@@ -102,6 +103,9 @@ private:
                     uint32_t $frameHeight,
                     Record3D::IntrinsicMatrixCoeffs $K)
     {
+
+
+    uint buf[Record3D::Record3DStream::MAXIMUM_FRAME_HEIGHT*Record3D::Record3DStream::MAXIMUM_FRAME_WIDTH] ;
 #ifdef HAS_OPENCV
         // When we switch between the TrueDepth and the LiDAR camera, the size frame size changes.
         // Recreate the RGB and Depth images with fitting size.
@@ -118,7 +122,19 @@ private:
         // The `BufferRGB` and `BufferDepth` may be larger than the actual payload, therefore the true frame size is computed.
         constexpr int numRGBChannels = 3;
         memcpy( imgRGB_.data, $rgbFrame.data(), $frameWidth * $frameHeight * numRGBChannels * sizeof(uint8_t));
-        memcpy( imgDepth_.data, $depthFrame.data(), $frameWidth * $frameHeight * sizeof(float));
+        //memcpy( imgDepth_.data, $depthFrame.data(), nBytes);
+
+
+        int nPixels = $frameWidth * $frameHeight;
+        int nBytes = nPixels * sizeof(float);
+
+        RvlCodec codec;
+        int nBytes2 = codec.CompressRVL((const unsigned short*) $depthFrame.data(),(unsigned char*) buf,nPixels);
+        //int nBytes2 = CompressRVL((short*) $depthFrame.data(), (char*) buf, nPixels);
+        cout << "nPixels " << nPixels << "nBytes " << nBytes << "   nBytes2 " << nBytes2 << endl;
+        
+        RvlCodec codec2; codec2.DecompressRVL((const unsigned char*) buf, (unsigned short*) imgDepth_.data, nPixels);
+        //DecompressRVL((char*) buf, (short*) imgDepth_.data, nPixels);
 #endif
         mainThreadLock_.unlock();
     }
