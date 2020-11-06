@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <lzfse.h>
+#include "RVL.h"
 #include <mutex>
 
 #ifdef HAS_OPENCV
@@ -52,9 +53,14 @@ inline auto read_vector_from_disk(std::string file_path)
     return data;
 }
 
+void write_buffer_to_disk(std::string file_path, char* data, int numBytes)
+{
+    std::ofstream ostream(file_path, std::ios::out | std::ios_base::binary);
+    ostream.write(reinterpret_cast<const char *>(data),numBytes);
+}
+
 cv::Mat readDepth(std::string path, int w, int h){
     std::vector<uint8_t>  rawMessageBuffer = read_vector_from_disk(path);
-    //cout<<"compressed size:\t"<<rawMessageBuffer.size()<<endl;
 
     std::vector<uint8_t> lzfseScratchBuffer_; /** Preallocated LZFSE scratch buffer. */
     lzfseScratchBuffer_.resize(lzfse_decode_scratch_size());
@@ -67,6 +73,24 @@ cv::Mat readDepth(std::string path, int w, int h){
     size_t outSize = lzfse_decode_buffer(imgDepth_.data, sizeInBytes, rawMessageBuffer.data(), rawMessageBuffer.size(),lzfseScratchBuffer_.data());
     //cout<<"decompressed size:\t"<<outSize<<endl;
 
+    double min, max;
+    cv::minMaxLoc(imgDepth_, &min, &max);
+    cout<<"lzfse size:\t"<<rawMessageBuffer.size()<<"\t range ["<<min<<","<<max<<"]"<<endl;
+
+    return imgDepth_;
+}
+
+cv::Mat readDepthRVL(std::string path, int w, int h){
+    std::vector<uint8_t>  rawMessageBuffer = read_vector_from_disk(path);
+
+    int nPixels = w*h;
+
+    cv::Mat imgDepth_ = cv::Mat(h,w,CV_16FC1);
+    RvlCodec codec2; codec2.DecompressRVL((const unsigned char*) rawMessageBuffer.data(), (unsigned short*) imgDepth_.data, nPixels);
+    //DecompressRVL((char*) buf, (short*) imgDepth_.data, nPixels); 
+
+    cout<<"RVL size:\t"<<rawMessageBuffer.size()<<endl;
+  
     return imgDepth_;
 }
 
@@ -74,7 +98,7 @@ cv::Mat readRGB(std::string path){
     return cv::imread(path);
 }
 
-void display(cv::Mat imgRGB_, cv::Mat imgDepth_, int fps, bool flip = false){
+void display(cv::Mat imgRGB_, cv::Mat imgDepth_, cv::Mat imgDepth16_, cv::Mat diff, int fps, bool flip = false){
     if ( flip )
     {
         cv::flip( imgRGB_, imgRGB_, 1 );
@@ -83,8 +107,20 @@ void display(cv::Mat imgRGB_, cv::Mat imgDepth_, int fps, bool flip = false){
 
     // Show images
     cv::imshow( "RGB", imgRGB_ );
-    cv::imshow( "Depth", imgDepth_ );
+    cv::imshow( "Depth_lzfse_32bit", imgDepth_ );
+    cv::imshow( "Depth_RVL_16bit", imgDepth16_ );
+    cv::imshow( "diff", diff );
     cv::waitKey(1000.0/fps);
+}
+
+void compressAndSave(std::string filename, cv::Mat depth){  //16 bit depth
+    RvlCodec codec;
+    int nPixels = depth.total();
+    short buf[nPixels]; //usually too large
+    int nBytes2 = codec.CompressRVL((const unsigned short*) depth.data, (unsigned char*) buf,nPixels);
+    //int nBytes2 = CompressRVL((short*) $depthFrame.data(), (char*) buf, nPixels);
+    write_buffer_to_disk(filename, (char*) buf,nBytes2);
+    //cout << "nPixels " << nPixels << "   nBytes2 " << nBytes2 << endl;
 }
 
 int main(int argc, char** argv)
@@ -110,10 +146,36 @@ int main(int argc, char** argv)
     assert(numFiles == ds.size());
 
     for(int i=0; i<numFiles; i++){
+        cout<<i<<endl;
         cv::Mat rgb = readRGB(cv::utils::fs::join(rgbd,std::to_string(i)+".jpg"));
-        cv::Mat depth = readDepth(cv::utils::fs::join(rgbd,std::to_string(i)+".depth"),m.w,m.h);
-        //cout<<i<<endl;
-        display(rgb, depth, m.fps);
+        
+        cv::Mat depth32 = readDepth(cv::utils::fs::join(rgbd,std::to_string(i)+".depth"),m.w,m.h);
+
+        auto rvlFile = cv::utils::fs::join(rgbd,std::to_string(i)+".rvl");
+        {
+            cv::Mat depth16;
+            depth32.convertTo(depth16,CV_16FC1);
+            compressAndSave(rvlFile,depth16);
+        }
+        
+        cv::Mat depth16 = readDepthRVL(rvlFile,m.w,m.h);
+        depth16.convertTo(depth16,CV_32FC1);
+
+        cv::Mat diff;// = depth32-depth16;
+        cv::absdiff(depth32,depth16,diff);
+
+        cv::Mat nanMask = diff == diff;
+        cv::Scalar meanDiff = cv::mean( diff, nanMask);
+        float meanD = meanDiff.val[0];
+
+        //cout<<diff<<endl;
+        double min,max;
+        cv::minMaxLoc(diff, &min, &max);
+        cout<<"mean_diff "<<meanD<<"\t range ["<<min<<","<<max<<"]"<<endl;
+        double range = max-min;
+        diff.convertTo(diff,CV_32FC1,1.0/range,-min);
+
+        display(rgb, depth32, depth16, diff, m.fps);
     }
 
 }
