@@ -75,4 +75,10 @@ if (OpenCV_FOUND)
     target_link_libraries(demo ${OpenCV_LIBS})
 endif ()
 
+add_executable(file src/FileReaderMain.cpp)
+target_link_libraries(file record3d_cpp)
+if (OpenCV_FOUND)
+    target_link_libraries(file ${OpenCV_LIBS})
+endif ()
+
 set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY true)
