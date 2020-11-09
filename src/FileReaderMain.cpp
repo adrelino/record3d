@@ -75,7 +75,7 @@ cv::Mat readDepth(std::string path, int w, int h){
 
     double min, max;
     cv::minMaxLoc(imgDepth_, &min, &max);
-    cout<<"lzfse size:\t"<<rawMessageBuffer.size()<<"\t range ["<<min<<","<<max<<"]"<<endl;
+    cout<<"lzfse\tsize:\t"<<rawMessageBuffer.size() / 1000.0<<" kB \t range ["<<min<<","<<max<<"] m"<<endl;
 
     return imgDepth_;
 }
@@ -89,7 +89,12 @@ cv::Mat readDepthRVL(std::string path, int w, int h){
     RvlCodec codec2; codec2.DecompressRVL((const unsigned char*) rawMessageBuffer.data(), (unsigned short*) imgDepth_.data, nPixels);
     //DecompressRVL((char*) buf, (short*) imgDepth_.data, nPixels); 
 
-    cout<<"RVL size:\t"<<rawMessageBuffer.size()<<endl;
+    //CV_16FC1 support is very limited in opencv, no minMaxLoc https://github.com/opencv/opencv/issues/14624
+    imgDepth_.convertTo(imgDepth_,CV_32FC1);
+
+    double min, max;
+    cv::minMaxLoc(imgDepth_, &min, &max);
+    cout<<"RVL\tsize:\t"<<rawMessageBuffer.size() / 1000.0 <<" kB \t range ["<<min<<","<<max<<"] m"<<endl;
   
     return imgDepth_;
 }
@@ -110,7 +115,7 @@ void display(cv::Mat imgRGB_, cv::Mat imgDepth_, cv::Mat imgDepth16_, cv::Mat di
     cv::imshow( "Depth_lzfse_32bit", imgDepth_ );
     cv::imshow( "Depth_RVL_16bit", imgDepth16_ );
     cv::imshow( "diff", diff );
-    cv::waitKey(1000.0/fps);
+    cv::waitKey(0);//1000.0/fps);
 }
 
 void compressAndSave(std::string filename, cv::Mat depth){  //16 bit depth
@@ -146,7 +151,7 @@ int main(int argc, char** argv)
     assert(numFiles == ds.size());
 
     for(int i=0; i<numFiles; i++){
-        cout<<i<<endl;
+        cout<<"frame: "<<i<<endl;
         cv::Mat rgb = readRGB(cv::utils::fs::join(rgbd,std::to_string(i)+".jpg"));
         
         cv::Mat depth32 = readDepth(cv::utils::fs::join(rgbd,std::to_string(i)+".depth"),m.w,m.h);
@@ -159,7 +164,6 @@ int main(int argc, char** argv)
         }
         
         cv::Mat depth16 = readDepthRVL(rvlFile,m.w,m.h);
-        depth16.convertTo(depth16,CV_32FC1);
 
         cv::Mat diff;// = depth32-depth16;
         cv::absdiff(depth32,depth16,diff);
@@ -171,7 +175,7 @@ int main(int argc, char** argv)
         //cout<<diff<<endl;
         double min,max;
         cv::minMaxLoc(diff, &min, &max);
-        cout<<"mean_diff "<<meanD<<"\t range ["<<min<<","<<max<<"]"<<endl;
+        cout<<"diff\tmean:\t"<<meanD*1000<<" mm\t max: "<<max*1000<< " mm"<<endl;
         double range = max-min;
         diff.convertTo(diff,CV_32FC1,1.0/range,-min);
 
