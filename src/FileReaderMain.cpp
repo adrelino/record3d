@@ -128,6 +128,16 @@ void compressAndSave(std::string filename, cv::Mat depth){  //16 bit depth
     //cout << "nPixels " << nPixels << "   nBytes2 " << nBytes2 << endl;
 }
 
+void numericalSort(std::vector<cv::String>& allImages){
+    std::sort(allImages.begin(), allImages.end(), [](const std::string &left, const std::string &right) {
+      int lengthdiff=left.size()-right.size();
+      if(lengthdiff==0){
+          return left < right;
+      }
+      return lengthdiff<0;
+  });
+}
+
 int main(int argc, char** argv)
 {
     if ( argc != 2 ){
@@ -150,11 +160,14 @@ int main(int argc, char** argv)
     cout<<"found "<<ds.size()<<" depth"<<endl;
     assert(numFiles == ds.size());
 
+    numericalSort(rgbs);
+    numericalSort(ds);
     for(int i=0; i<numFiles; i++){
         cout<<"frame: "<<i<<endl;
-        cv::Mat rgb = readRGB(cv::utils::fs::join(rgbd,std::to_string(i)+".jpg"));
+        cv::Mat rgb = readRGB(rgbs[i]);
+        m.w=rgb.cols;m.h=rgb.rows;//or assert that they are same as in intrinsics
+        cv::Mat depth32 = readDepth(ds[i],m.w,m.h);
         
-        cv::Mat depth32 = readDepth(cv::utils::fs::join(rgbd,std::to_string(i)+".depth"),m.w,m.h);
 
         auto rvlFile = cv::utils::fs::join(rgbd,std::to_string(i)+".rvl");
         {
