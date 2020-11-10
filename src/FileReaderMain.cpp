@@ -22,6 +22,7 @@ Metadata readMetadata(std::string path){
     std::string json = path+".json";
     {//save with .json ending so FileStorage can determine type
         std::ifstream myfile(path);
+        if(!myfile.is_open()) return Metadata{};
         std::string line;
         std::getline(myfile,line);
         cout<<line<<endl;
@@ -118,7 +119,7 @@ void display(cv::Mat imgRGB_, cv::Mat imgDepth_, cv::Mat imgDepth16_, cv::Mat di
     cv::imshow( "Depth_lzfse_32bit", imgDepth_ );
     cv::imshow( "Depth_RVL_16bit", imgDepth16_ );
     cv::imshow( "diff", diff );
-    cv::waitKey(0);//1000.0/fps);
+    cv::waitKey(1000.0/fps);
 }
 
 void compressAndSave(std::string filename, cv::Mat depth){  //16 bit depth
@@ -175,6 +176,11 @@ int main(int argc, char** argv)
     std::string rgbd = cv::utils::fs::join(folder,"rgbd");
     cv::glob(cv::utils::fs::join(rgbd,"*.jpg"),rgbs);
     cv::glob(cv::utils::fs::join(rgbd,"*.depth"),ds);
+    int numDotDepthFiles = ds.size();
+    if(numDotDepthFiles == 0){
+        cv::glob(cv::utils::fs::join(rgbd,"color_*"),rgbs);
+        cv::glob(cv::utils::fs::join(rgbd,"depth_*"),ds);
+    }
     int numFiles = rgbs.size();
     cout<<"found "<<numFiles<<" rgb"<<endl;
     cout<<"found "<<ds.size()<<" depth"<<endl;
@@ -186,8 +192,13 @@ int main(int argc, char** argv)
         cout<<"frame: "<<i<<endl;
         cv::Mat rgb = readRGB(rgbs[i]);
         m.w=rgb.cols;m.h=rgb.rows;//or assert that they are same as in intrinsics
-        cv::Mat depth32 = readDepth(ds[i],m.w,m.h);
-        
+        cv::Mat depth32;
+        if(numDotDepthFiles == 0){
+            cv::Mat depth16U = OpenCVHelpers::readDepthPngExr(ds[i],true);
+            depth16U.convertTo( depth32, CV_32FC1, 0.001); // convert to meters
+        }else{
+            depth32 = readDepth(ds[i],m.w,m.h);
+        }
 
         auto rvlFile = cv::utils::fs::join(rgbd,std::to_string(i)+".rvl");
         {
