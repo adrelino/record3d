@@ -8,6 +8,7 @@
 #ifdef HAS_OPENCV
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/utils/filesystem.hpp>
+#include "OpenCVHelpers.h"
 #endif
 
 using namespace std;
@@ -80,17 +81,19 @@ cv::Mat readDepth(std::string path, int w, int h){
     return imgDepth_;
 }
 
-cv::Mat readDepthRVL(std::string path, int w, int h){
+cv::Mat readDepthRVL(std::string path, int w, int h, int HALF_PRECISION_TYPE, int float32toUint16Factor=1000){
     std::vector<uint8_t>  rawMessageBuffer = read_vector_from_disk(path);
 
     int nPixels = w*h;
 
-    cv::Mat imgDepth_ = cv::Mat(h,w,CV_16FC1);
+    cv::Mat imgDepth_ = cv::Mat(h,w,HALF_PRECISION_TYPE);
     RvlCodec codec2; codec2.DecompressRVL((const unsigned char*) rawMessageBuffer.data(), (unsigned short*) imgDepth_.data, nPixels);
     //DecompressRVL((char*) buf, (short*) imgDepth_.data, nPixels); 
 
     //CV_16FC1 support is very limited in opencv, no minMaxLoc https://github.com/opencv/opencv/issues/14624
-    imgDepth_.convertTo(imgDepth_,CV_32FC1);
+    //imgDepth_.convertTo(imgDepth_,CV_32FC1);
+    //CV_16UC1: convert mm to meters
+    imgDepth_.convertTo(imgDepth_,CV_32FC1,1.0/float32toUint16Factor); // convert to meters
 
     double min, max;
     cv::minMaxLoc(imgDepth_, &min, &max);
@@ -140,10 +143,27 @@ void numericalSort(std::vector<cv::String>& allImages){
 
 int main(int argc, char** argv)
 {
-    if ( argc != 2 ){
-        cout<<"usage: "<< argv[0] <<" <.r3d folder>" << endl;
+    if ( argc < 2 ){
+        cout<<"usage: "<< argv[0] <<" <.r3d folder> <float16|uint16> <1000>" << endl;
         return -1;
     }
+
+    int HALF_PRECISION_TYPE = CV_16F;
+    int float32toUint16Factor = 1;
+
+    if(argc >= 3){
+        if(strcmp(argv[2],"uint16") == 0){
+            HALF_PRECISION_TYPE = CV_16UC1;
+            float32toUint16Factor = 1000; //save with millimeter discretization in uint16 format per default
+        }
+    }
+    cout<<"HALF_PRECISION_TYPE "<<HALF_PRECISION_TYPE<<" "<<OpenCVHelpers::getImageType(HALF_PRECISION_TYPE)<<endl;
+
+    if(argc == 4){
+        float32toUint16Factor = stoi(argv[3]);
+    }
+    cout<<"float32toUint16Factor "<<float32toUint16Factor<<endl;
+
 
     std::string folder = argv[1];
 
@@ -172,11 +192,11 @@ int main(int argc, char** argv)
         auto rvlFile = cv::utils::fs::join(rgbd,std::to_string(i)+".rvl");
         {
             cv::Mat depth16;
-            depth32.convertTo(depth16,CV_16FC1);
+            depth32.convertTo(depth16,HALF_PRECISION_TYPE,float32toUint16Factor);
             compressAndSave(rvlFile,depth16);
         }
         
-        cv::Mat depth16 = readDepthRVL(rvlFile,m.w,m.h);
+        cv::Mat depth16 = readDepthRVL(rvlFile,m.w,m.h,HALF_PRECISION_TYPE,float32toUint16Factor);
 
         cv::Mat diff;// = depth32-depth16;
         cv::absdiff(depth32,depth16,diff);
@@ -190,7 +210,11 @@ int main(int argc, char** argv)
         cv::minMaxLoc(diff, &min, &max);
         cout<<"diff\tmean:\t"<<meanD*1000<<" mm\t max: "<<max*1000<< " mm"<<endl;
         double range = max-min;
-        diff.convertTo(diff,CV_32FC1,1.0/range,-min);
+        //diff.convertTo(diff,CV_32FC1,1.0/range,-min);
+        float scale = 255.0f / range;
+        diff.convertTo(diff, CV_8UC1, scale, -min * scale);
+
+        cv::imwrite(to_string(i)+"_diff_"+OpenCVHelpers::getImageType(HALF_PRECISION_TYPE)+"_"+to_string(float32toUint16Factor)+".jpg",diff);
 
         display(rgb, depth32, depth16, diff, m.fps);
     }
